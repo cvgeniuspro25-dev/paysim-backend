@@ -1,0 +1,30 @@
+# Dependencias
+node_modules/
+package-lock.json
+
+# Variables de entorno (contiene claves secretas)
+.env
+
+# Archivos de sistema operativo
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Archivos temporales
+*.tmp
+*.temp
+
+# Cobertura de pruebas
+coverage/
+
+# Archivos de configuración de IDE
+.vscode/
+.idea/
+
+# Backups locales
+*.backup
+*.sql
