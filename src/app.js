@@ -5,6 +5,8 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const hpp = require("hpp");
 require("dotenv").config();
+// Importar conexión a base de datos
+const db = require("./config/db");
 
 // Inicializar Express
 const app = express();
@@ -64,7 +66,24 @@ app.get("/api/health", (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
-
+// Ruta de prueba para verificar conexión a base de datos
+app.get("/api/db-test", async (req, res) => {
+  try {
+    const result = await db.query("SELECT NOW()");
+    res.status(200).json({
+      status: "success",
+      message: "Conexión a PostgreSQL exitosa",
+      timestamp: result.rows[0].now,
+    });
+  } catch (error) {
+    console.error("Error en db-test:", error);
+    res.status(500).json({
+      status: "error",
+      message: "Error al conectar con la base de datos",
+      error: error.message,
+    });
+  }
+});
 // TODO: Aquí se montarán las rutas de los diferentes módulos
 // Ejemplo: app.use('/api/v1/auth', authRoutes);
 // Ejemplo: app.use('/api/v1/users', userRoutes);
