@@ -40,9 +40,22 @@ app.use(hpp());
 // ==========================================
 
 // Habilitar CORS para el frontend en IP fija 192.168.10.12:5180
+const allowedOrigins = [
+  "http://192.168.10.12:5180", // Desarrollo local
+  "https://paysim-frontend.vercel.app", // Producción en Vercel (reemplaza con tu URL exacta)
+];
+
 app.use(
   cors({
-    origin: "http://192.168.10.12:5180",
+    origin: function (origin, callback) {
+      // Permitir solicitudes sin origen (como Postman o curl)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Origen no permitido por CORS"));
+      }
+    },
     credentials: true,
     optionsSuccessStatus: 200,
   }),
