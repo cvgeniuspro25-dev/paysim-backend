@@ -97,7 +97,11 @@ app.get("/api/db-test", async (req, res) => {
     });
   }
 });
-// TODO: Aquí se montarán las rutas de los diferentes módulos
+// Importar rutas
+const authRoutes = require("./routes/auth");
+
+// Montar rutas de autenticación
+app.use("/api/auth", authRoutes);
 // Ejemplo: app.use('/api/v1/auth', authRoutes);
 // Ejemplo: app.use('/api/v1/users', userRoutes);
 
