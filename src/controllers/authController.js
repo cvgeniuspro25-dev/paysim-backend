@@ -332,7 +332,7 @@ exports.activarCuenta = async (req, res) => {
         requierePago: true,
         plan: "payasyougo",
         usuario_id: userData.id,
-        pasarelaUrl: `${process.env.PAYM_FRONTEND_URL}/checkout?api_key=${process.env.PAYM_PUBLIC_KEY}&amount=1&currency=ARS&concept=Validación de tarjeta - PayAsYouGo&ref=user_${userData.id}_token_${token}&tokenize=true`,
+        pasarelaUrl: `${process.env.PAYM_FRONTEND_URL}/checkout?api_key=${process.env.PAYM_PUBLIC_KEY}&amount=1&currency=ARS&concept=Validación de tarjeta - PayAsYouGo&ref=user_${userData.id}_token_${token}&tokenize=true&tokenize_disabled=true`,
       });
     } else {
       // Planes pagos (Starter, Pro, Enterprise)
