@@ -219,6 +219,91 @@ module.exports = {
   // SECCIÓN 12: PLANTILLAS DE CORREO ELECTRÓNICO
   // ==========================================
   plantillasEmail: {
+    recuperarContrasena: {
+      asunto: "Recuperación de contraseña - PaySim",
+      cuerpo: (nombre, enlace) => `
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px;">
+          <tr>
+            <td align="center">
+              <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                <tr>
+                  <td style="background-color: #009EE3; padding: 30px 20px; text-align: center;">
+                    <h1 style="color: #ffffff; font-family: Arial, sans-serif; font-size: 28px; margin: 0;">PaySim</h1>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 40px 30px;">
+                    <h2 style="color: #333333; font-family: Arial, sans-serif; font-size: 22px; margin: 0 0 15px;">Hola, ${nombre}!</h2>
+                    <p style="color: #555555; font-family: Arial, sans-serif; font-size: 16px; line-height: 1.6; margin: 0 0 25px;">
+                      Recibimos una solicitud para restablecer tu contraseña. Hacé clic en el botón de abajo para continuar.
+                    </p>
+                    <p style="color: #555555; font-family: Arial, sans-serif; font-size: 16px; line-height: 1.6; margin: 0 0 25px;">
+                      Si no fuiste vos, simplemente ignorá este mensaje.
+                    </p>
+                    <table cellpadding="0" cellspacing="0" style="margin: 0 auto;">
+                      <tr>
+                        <td align="center" style="background-color: #009EE3; padding: 14px 32px; border-radius: 6px;">
+                          <a href="${enlace}" style="color: #ffffff; font-family: Arial, sans-serif; font-size: 16px; font-weight: bold; text-decoration: none;">Cambiar contraseña</a>
+                        </td>
+                      </tr>
+                    </table>
+                    <p style="color: #777777; font-family: Arial, sans-serif; font-size: 14px; line-height: 1.5; margin-top: 25px;">
+                      Si el botón no funciona, copiá y pegá este enlace en tu navegador:<br>
+                      <a href="${enlace}" style="color: #009EE3; word-break: break-all;">${enlace}</a>
+                    </p>
+                    <p style="color: #999999; font-family: Arial, sans-serif; font-size: 13px; margin-top: 25px;">
+                      Este enlace expirará en 1 hora por razones de seguridad.
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background-color: #f8f8f8; padding: 20px 30px; text-align: center;">
+                    <p style="color: #aaaaaa; font-family: Arial, sans-serif; font-size: 12px; margin: 0;">© 2026 PaySim. Todos los derechos reservados.</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      `,
+    },
+    recordarUsuario: {
+      asunto: "Recordatorio de usuario - PaySim",
+      cuerpo: (nombre, username) => `
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4; padding: 20px;">
+          <tr>
+            <td align="center">
+              <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                <tr>
+                  <td style="background-color: #009EE3; padding: 30px 20px; text-align: center;">
+                    <h1 style="color: #ffffff; font-family: Arial, sans-serif; font-size: 28px; margin: 0;">PaySim</h1>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 40px 30px;">
+                    <h2 style="color: #333333; font-family: Arial, sans-serif; font-size: 22px; margin: 0 0 15px;">Hola, ${nombre}!</h2>
+                    <p style="color: #555555; font-family: Arial, sans-serif; font-size: 16px; line-height: 1.6; margin: 0 0 25px;">
+                      Recibimos una solicitud para recordar tu nombre de usuario.
+                    </p>
+                    <p style="color: #333333; font-family: Arial, sans-serif; font-size: 18px; font-weight: bold; text-align: center; margin: 0 0 25px;">
+                      Tu nombre de usuario es: <span style="color: #009EE3;">${username}</span>
+                    </p>
+                    <p style="color: #999999; font-family: Arial, sans-serif; font-size: 13px; margin-top: 25px;">
+                      Si no solicitaste esto, ignorá este mensaje.
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background-color: #f8f8f8; padding: 20px 30px; text-align: center;">
+                    <p style="color: #aaaaaa; font-family: Arial, sans-serif; font-size: 12px; margin: 0;">© 2026 PaySim. Todos los derechos reservados.</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      `,
+    },
     activacion: {
       asunto: "Activa tu cuenta de PaySim",
       cuerpo: (nombre, activationLink) => `

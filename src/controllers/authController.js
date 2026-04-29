@@ -578,3 +578,342 @@ exports.invalidarToken = async (req, res) => {
     return res.status(500).json({ error: "Error interno del servidor" });
   }
 };
+
+// POST /api/auth/login
+exports.login = async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    // 1. Validar campos obligatorios
+    if (!username || !password) {
+      return res
+        .status(400)
+        .json({ error: "Usuario y contraseña son obligatorios" });
+    }
+
+    // 2. Buscar usuario por username (case-insensitive)
+    const userResult = await db.query(
+      "SELECT id, username, email, password_hash, email_verificado, tipo_cuenta, rol FROM usuarios WHERE LOWER(username) = LOWER($1)",
+      [username],
+    );
+
+    if (userResult.rows.length === 0) {
+      return res
+        .status(401)
+        .json({ error: "Usuario o contraseña incorrectos" });
+    }
+
+    const usuario = userResult.rows[0];
+
+    // 3. Verificar contraseña
+    const passwordValido = await bcrypt.compare(
+      password,
+      usuario.password_hash,
+    );
+    if (!passwordValido) {
+      return res
+        .status(401)
+        .json({ error: "Usuario o contraseña incorrectos" });
+    }
+
+    // 4. Verificar cuenta activada
+    if (!usuario.email_verificado) {
+      return res.status(403).json({
+        error: "Cuenta no activada. Revisa tu correo para activarla.",
+      });
+    }
+
+    // 5. Generar JWT
+    const jwt = require("jsonwebtoken");
+    const token = jwt.sign(
+      {
+        id: usuario.id,
+        username: usuario.username,
+        tipo_cuenta: usuario.tipo_cuenta,
+        rol: usuario.rol,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "24h" },
+    );
+
+    // 6. Responder con token y datos del usuario
+    res.status(200).json({
+      mensaje: "Inicio de sesión exitoso",
+      token,
+      usuario: {
+        id: usuario.id,
+        username: usuario.username,
+        email: usuario.email,
+        tipo_cuenta: usuario.tipo_cuenta,
+        rol: usuario.rol,
+      },
+    });
+  } catch (error) {
+    console.error("Error en login:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+};
+
+// POST /api/auth/recordar-usuario
+exports.recordarUsuario = async (req, res) => {
+  try {
+    const { dni } = req.body;
+    if (!dni || !/^\d{7,10}$/.test(dni)) {
+      return res.status(400).json({ error: "DNI inválido" });
+    }
+
+    const usuario = await db.query(
+      "SELECT username, email, nombre FROM usuarios WHERE dni = $1",
+      [dni],
+    );
+
+    if (usuario.rows.length === 0) {
+      // Por seguridad, no revelamos si el DNI existe o no
+      return res.status(200).json({
+        mensaje:
+          "Si el DNI coincide con una cuenta, recibirás un email con tu nombre de usuario.",
+      });
+    }
+
+    const { username, email, nombre } = usuario.rows[0];
+
+    const mailOptions = {
+      from: `"${process.env.EMAIL_FROM_NAME}" <${process.env.EMAIL_FROM_ADDRESS}>`,
+      to: email,
+      subject: cerebro.plantillasEmail.recordarUsuario.asunto,
+      html: cerebro.plantillasEmail.recordarUsuario.cuerpo(
+        nombre || username,
+        username,
+      ),
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    return res.status(200).json({
+      mensaje:
+        "Si el DNI coincide con una cuenta, recibirás un email con tu nombre de usuario.",
+    });
+  } catch (error) {
+    console.error("Error en recordar-usuario:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+};
+
+// POST /api/auth/reenviar-activacion
+exports.reenviarActivacion = async (req, res) => {
+  try {
+    const { username, dni } = req.body;
+
+    if (!username || !dni) {
+      return res.status(400).json({ error: "Usuario y DNI son obligatorios" });
+    }
+
+    // Buscar usuario por username y dni
+    const usuario = await db.query(
+      "SELECT id, email, email_verificado, nombre FROM usuarios WHERE LOWER(username) = LOWER($1) AND dni = $2",
+      [username, dni],
+    );
+
+    if (usuario.rows.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "Datos incorrectos o usuario no encontrado" });
+    }
+
+    const userData = usuario.rows[0];
+
+    // Verificar que la cuenta NO esté activada
+    if (userData.email_verificado) {
+      return res.status(400).json({ error: "La cuenta ya está activada" });
+    }
+
+    // Invalidar tokens anteriores de este usuario
+    await db.query(
+      "UPDATE tokens SET usado = TRUE WHERE usuario_id = $1 AND tipo = 'activacion' AND usado = FALSE",
+      [userData.id],
+    );
+
+    // Generar nuevo token
+    const token = generarToken();
+    const expiraEn = new Date(
+      Date.now() + cerebro.autenticacion.duracionTokenActivacion,
+    );
+    await db.query(
+      "INSERT INTO tokens (usuario_id, tipo, token, expira_en) VALUES ($1, $2, $3, $4)",
+      [userData.id, "activacion", token, expiraEn],
+    );
+
+    // Enviar email
+    await enviarEmailActivacion(
+      userData.email,
+      userData.nombre || username,
+      token,
+    );
+
+    return res
+      .status(200)
+      .json({ mensaje: "Email de activación reenviado. Revisá tu correo." });
+  } catch (error) {
+    console.error("Error en reenviar-activacion:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+};
+
+// POST /api/auth/recuperar-contrasena
+exports.recuperarContrasena = async (req, res) => {
+  try {
+    const { username } = req.body;
+    if (!username) {
+      return res.status(400).json({ error: "Usuario es obligatorio" });
+    }
+
+    // Buscar usuario por username (case-insensitive)
+    const usuario = await db.query(
+      "SELECT id, email, nombre FROM usuarios WHERE LOWER(username) = LOWER($1)",
+      [username],
+    );
+
+    // Por seguridad, siempre devolver el mismo mensaje
+    if (usuario.rows.length === 0) {
+      return res.status(200).json({
+        mensaje: "Si la cuenta existe, recibirás un email con instrucciones.",
+      });
+    }
+
+    const { id, email, nombre } = usuario.rows[0];
+
+    // Invalidar tokens de recuperación anteriores de este usuario
+    await db.query(
+      "UPDATE tokens SET usado = TRUE WHERE usuario_id = $1 AND tipo = 'recuperacion' AND usado = FALSE",
+      [id],
+    );
+
+    // Generar nuevo token de recuperación (1 hora)
+    const token = generarToken();
+    const expiraEn = new Date(
+      Date.now() + cerebro.autenticacion.duracionTokenRecuperacion,
+    );
+    await db.query(
+      "INSERT INTO tokens (usuario_id, tipo, token, expira_en) VALUES ($1, $2, $3, $4)",
+      [id, "recuperacion", token, expiraEn],
+    );
+
+    // Enviar email con enlace de recuperación
+    const frontendUrl =
+      process.env.NODE_ENV === "production"
+        ? process.env.FRONTEND_URL_PROD
+        : cerebro.urls.frontendLocal;
+    const enlace = `${frontendUrl}/cambiar-contrasena/${token}`;
+
+    const mailOptions = {
+      from: `"${process.env.EMAIL_FROM_NAME}" <${process.env.EMAIL_FROM_ADDRESS}>`,
+      to: email,
+      subject: cerebro.plantillasEmail.recuperarContrasena.asunto,
+      html: cerebro.plantillasEmail.recuperarContrasena.cuerpo(
+        nombre || username,
+        enlace,
+      ),
+    };
+    await transporter.sendMail(mailOptions);
+
+    return res.status(200).json({
+      mensaje: "Si la cuenta existe, recibirás un email con instrucciones.",
+    });
+  } catch (error) {
+    console.error("Error en recuperar-contrasena:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+};
+
+// GET /api/auth/validar-token-recuperacion/:token
+exports.validarTokenRecuperacion = async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    const tokenResult = await db.query(
+      "SELECT * FROM tokens WHERE token = $1 AND tipo = 'recuperacion'",
+      [token],
+    );
+
+    if (tokenResult.rows.length === 0) {
+      return res.status(400).json({ valido: false, error: "Token inválido" });
+    }
+
+    const tokenData = tokenResult.rows[0];
+
+    if (tokenData.usado) {
+      return res
+        .status(400)
+        .json({ valido: false, error: "Token ya utilizado" });
+    }
+
+    if (new Date() > new Date(tokenData.expira_en)) {
+      return res.status(400).json({ valido: false, error: "Token expirado" });
+    }
+
+    return res.json({ valido: true, usuario_id: tokenData.usuario_id });
+  } catch (error) {
+    console.error("Error en validar-token-recuperacion:", error);
+    res.status(500).json({ valido: false, error: "Error interno" });
+  }
+};
+
+// POST /api/auth/cambiar-contrasena
+exports.cambiarContrasena = async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) {
+      return res
+        .status(400)
+        .json({ error: "Token y contraseña son obligatorios" });
+    }
+
+    // Validar requisitos de contraseña
+    const passConfig = cerebro.autenticacion.password;
+    if (password.length < passConfig.minLongitud) {
+      return res
+        .status(400)
+        .json({ error: `Mínimo ${passConfig.minLongitud} caracteres` });
+    }
+    if (passConfig.requiereMayuscula && !/[A-Z]/.test(password)) {
+      return res.status(400).json({ error: "Debe contener una mayúscula" });
+    }
+    if (passConfig.requiereMinuscula && !/[a-z]/.test(password)) {
+      return res.status(400).json({ error: "Debe contener una minúscula" });
+    }
+    if (passConfig.requiereNumero && !/[0-9]/.test(password)) {
+      return res.status(400).json({ error: "Debe contener un número" });
+    }
+
+    // Buscar token válido
+    const tokenResult = await db.query(
+      "SELECT * FROM tokens WHERE token = $1 AND tipo = 'recuperacion' AND usado = FALSE AND expira_en > NOW()",
+      [token],
+    );
+    if (tokenResult.rows.length === 0) {
+      return res.status(400).json({ error: "Token inválido o expirado" });
+    }
+
+    const tokenData = tokenResult.rows[0];
+
+    // Hashear nueva contraseña
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+
+    // Actualizar contraseña
+    await db.query("UPDATE usuarios SET password_hash = $1 WHERE id = $2", [
+      passwordHash,
+      tokenData.usuario_id,
+    ]);
+
+    // Marcar token como usado
+    await db.query("UPDATE tokens SET usado = TRUE WHERE id = $1", [
+      tokenData.id,
+    ]);
+
+    return res.json({ mensaje: "Contraseña actualizada correctamente" });
+  } catch (error) {
+    console.error("Error en cambiar-contrasena:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+};
