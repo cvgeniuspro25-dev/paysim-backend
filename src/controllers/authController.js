@@ -618,9 +618,11 @@ exports.login = async (req, res) => {
 
     // 4. Verificar cuenta activada
     if (!usuario.email_verificado) {
-      return res.status(403).json({
-        error: "Cuenta no activada. Revisa tu correo para activarla.",
-      });
+      return res
+        .status(403)
+        .json({
+          error: "Cuenta no activada. Revisa tu correo para activarla.",
+        });
     }
 
     // 5. Generar JWT
@@ -668,11 +670,12 @@ exports.recordarUsuario = async (req, res) => {
     );
 
     if (usuario.rows.length === 0) {
-      // Por seguridad, no revelamos si el DNI existe o no
-      return res.status(200).json({
-        mensaje:
-          "Si el DNI coincide con una cuenta, recibirás un email con tu nombre de usuario.",
-      });
+      return res
+        .status(200)
+        .json({
+          mensaje:
+            "Si el DNI coincide con una cuenta, recibirás un email con tu nombre de usuario.",
+        });
     }
 
     const { username, email, nombre } = usuario.rows[0];
@@ -689,10 +692,12 @@ exports.recordarUsuario = async (req, res) => {
 
     await transporter.sendMail(mailOptions);
 
-    return res.status(200).json({
-      mensaje:
-        "Si el DNI coincide con una cuenta, recibirás un email con tu nombre de usuario.",
-    });
+    return res
+      .status(200)
+      .json({
+        mensaje:
+          "Si el DNI coincide con una cuenta, recibirás un email con tu nombre de usuario.",
+      });
   } catch (error) {
     console.error("Error en recordar-usuario:", error);
     res.status(500).json({ error: "Error interno del servidor" });
@@ -708,7 +713,6 @@ exports.reenviarActivacion = async (req, res) => {
       return res.status(400).json({ error: "Usuario y DNI son obligatorios" });
     }
 
-    // Buscar usuario por username y dni
     const usuario = await db.query(
       "SELECT id, email, email_verificado, nombre FROM usuarios WHERE LOWER(username) = LOWER($1) AND dni = $2",
       [username, dni],
@@ -722,18 +726,15 @@ exports.reenviarActivacion = async (req, res) => {
 
     const userData = usuario.rows[0];
 
-    // Verificar que la cuenta NO esté activada
     if (userData.email_verificado) {
       return res.status(400).json({ error: "La cuenta ya está activada" });
     }
 
-    // Invalidar tokens anteriores de este usuario
     await db.query(
       "UPDATE tokens SET usado = TRUE WHERE usuario_id = $1 AND tipo = 'activacion' AND usado = FALSE",
       [userData.id],
     );
 
-    // Generar nuevo token
     const token = generarToken();
     const expiraEn = new Date(
       Date.now() + cerebro.autenticacion.duracionTokenActivacion,
@@ -743,7 +744,6 @@ exports.reenviarActivacion = async (req, res) => {
       [userData.id, "activacion", token, expiraEn],
     );
 
-    // Enviar email
     await enviarEmailActivacion(
       userData.email,
       userData.nombre || username,
@@ -767,28 +767,26 @@ exports.recuperarContrasena = async (req, res) => {
       return res.status(400).json({ error: "Usuario es obligatorio" });
     }
 
-    // Buscar usuario por username (case-insensitive)
     const usuario = await db.query(
       "SELECT id, email, nombre FROM usuarios WHERE LOWER(username) = LOWER($1)",
       [username],
     );
 
-    // Por seguridad, siempre devolver el mismo mensaje
     if (usuario.rows.length === 0) {
-      return res.status(200).json({
-        mensaje: "Si la cuenta existe, recibirás un email con instrucciones.",
-      });
+      return res
+        .status(200)
+        .json({
+          mensaje: "Si la cuenta existe, recibirás un email con instrucciones.",
+        });
     }
 
     const { id, email, nombre } = usuario.rows[0];
 
-    // Invalidar tokens de recuperación anteriores de este usuario
     await db.query(
       "UPDATE tokens SET usado = TRUE WHERE usuario_id = $1 AND tipo = 'recuperacion' AND usado = FALSE",
       [id],
     );
 
-    // Generar nuevo token de recuperación (1 hora)
     const token = generarToken();
     const expiraEn = new Date(
       Date.now() + cerebro.autenticacion.duracionTokenRecuperacion,
@@ -798,7 +796,6 @@ exports.recuperarContrasena = async (req, res) => {
       [id, "recuperacion", token, expiraEn],
     );
 
-    // Enviar email con enlace de recuperación
     const frontendUrl =
       process.env.NODE_ENV === "production"
         ? process.env.FRONTEND_URL_PROD
@@ -816,9 +813,11 @@ exports.recuperarContrasena = async (req, res) => {
     };
     await transporter.sendMail(mailOptions);
 
-    return res.status(200).json({
-      mensaje: "Si la cuenta existe, recibirás un email con instrucciones.",
-    });
+    return res
+      .status(200)
+      .json({
+        mensaje: "Si la cuenta existe, recibirás un email con instrucciones.",
+      });
   } catch (error) {
     console.error("Error en recuperar-contrasena:", error);
     res.status(500).json({ error: "Error interno del servidor" });
@@ -868,7 +867,6 @@ exports.cambiarContrasena = async (req, res) => {
         .json({ error: "Token y contraseña son obligatorios" });
     }
 
-    // Validar requisitos de contraseña
     const passConfig = cerebro.autenticacion.password;
     if (password.length < passConfig.minLongitud) {
       return res
@@ -885,7 +883,6 @@ exports.cambiarContrasena = async (req, res) => {
       return res.status(400).json({ error: "Debe contener un número" });
     }
 
-    // Buscar token válido
     const tokenResult = await db.query(
       "SELECT * FROM tokens WHERE token = $1 AND tipo = 'recuperacion' AND usado = FALSE AND expira_en > NOW()",
       [token],
@@ -896,17 +893,14 @@ exports.cambiarContrasena = async (req, res) => {
 
     const tokenData = tokenResult.rows[0];
 
-    // Hashear nueva contraseña
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
 
-    // Actualizar contraseña
     await db.query("UPDATE usuarios SET password_hash = $1 WHERE id = $2", [
       passwordHash,
       tokenData.usuario_id,
     ]);
 
-    // Marcar token como usado
     await db.query("UPDATE tokens SET usado = TRUE WHERE id = $1", [
       tokenData.id,
     ]);

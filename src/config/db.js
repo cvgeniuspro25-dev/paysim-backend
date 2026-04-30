@@ -1,9 +1,9 @@
 // backend/src/config/db.js
-const { Pool } = require('pg');
-require('dotenv').config({ path: './.env' });
+const { Pool } = require("pg");
+require("dotenv").config({ path: "./.env" });
 
 // Determinar si estamos en Railway (producción) o en local
-const isProduction = process.env.NODE_ENV === 'production';
+const isProduction = process.env.NODE_ENV === "production";
 
 // Configuración de conexión
 const pool = new Pool(
@@ -11,26 +11,23 @@ const pool = new Pool(
     ? {
         // Railway inyecta DATABASE_URL automáticamente
         connectionString: process.env.DATABASE_URL,
-        ssl: {
-          rejectUnauthorized: false, // Requerido por Railway
-        },
       }
     : {
         // Desarrollo local
-        host: process.env.DB_HOST || 'localhost',
+        host: process.env.DB_HOST || "localhost",
         port: process.env.DB_PORT || 5432,
-        user: process.env.DB_USER || 'postgres',
+        user: process.env.DB_USER || "postgres",
         password: process.env.DB_PASSWORD,
-        database: process.env.DB_NAME || 'paysim_db',
-      }
+        database: process.env.DB_NAME || "paysim_db",
+      },
 );
 
 // Probar conexión
 pool.connect((err, client, release) => {
   if (err) {
-    console.error('❌ Error al conectar a PostgreSQL:', err.stack);
+    console.error("❌ Error al conectar a PostgreSQL:", err.stack);
   } else {
-    console.log('✅ Conectado a PostgreSQL correctamente');
+    console.log("✅ Conectado a PostgreSQL correctamente");
     release();
   }
 });
