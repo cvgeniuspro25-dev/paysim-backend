@@ -11,7 +11,7 @@ require("./src/services/cotizacionService");
 const PORT = process.env.PORT || 5000;
 
 // Iniciar el servidor
-const server = app.listen(PORT, "0.0.0.0", () => {
+const server = app.listen(PORT, "::", () => {
   console.log(`✅ Servidor PaySim corriendo en http://192.168.10.12:${PORT}`);
   console.log(
     `📡 Health check disponible en http://192.168.10.12:${PORT}/api/health`,
