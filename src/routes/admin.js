@@ -6,7 +6,6 @@ const {
   verificarToken,
   verificarAdmin,
 } = require("../middleware/authMiddleware");
-const upload = require("../middleware/uploadMiddleware");
 
 router.use(verificarToken);
 router.use(verificarAdmin);
@@ -14,7 +13,7 @@ router.use(verificarAdmin);
 router.get("/perfil", adminController.obtenerPerfil);
 router.put("/perfil", adminController.actualizarPerfil);
 router.post("/cambiar-password", adminController.cambiarPassword);
-router.post("/subir-foto", upload.single("foto"), adminController.subirFoto);
+router.post("/subir-foto", adminController.subirFoto);
 
 router.get("/usuarios", adminController.listarUsuarios);
 router.get("/usuarios/:id", adminController.obtenerUsuario);

@@ -15,9 +15,9 @@ exports.obtenerPerfil = async (req, res) => {
     const { id } = req.user;
     const result = await db.query(
       `SELECT username, email, nombre, apellido, dni, fecha_nacimiento, sexo,
-              domicilio, localidad, cod_postal, provincia, foto_perfil
+              domicilio, localidad, cod_postal, provincia, telefono, foto_perfil
        FROM usuarios WHERE id = $1`,
-      [id]
+      [id],
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Usuario no encontrado" });
@@ -37,13 +37,15 @@ exports.actualizarPerfil = async (req, res) => {
     const {
       nombre,
       apellido,
+      email,
+      dni,
       fecha_nacimiento,
       sexo,
       domicilio,
       localidad,
       cod_postal,
       provincia,
-      dni, // el DNI es obligatorio
+      telefono,
     } = req.body;
 
     // Validar campos obligatorios
@@ -64,7 +66,7 @@ exports.actualizarPerfil = async (req, res) => {
     // Verificar que el DNI no esté en uso por otro usuario
     const dniCheck = await db.query(
       "SELECT id FROM usuarios WHERE dni = $1 AND id != $2",
-      [dni, id]
+      [dni, id],
     );
     if (dniCheck.rows.length > 0) {
       return res.status(409).json({ error: "El DNI ya está en uso" });
@@ -74,19 +76,22 @@ exports.actualizarPerfil = async (req, res) => {
       `UPDATE usuarios SET
         nombre = COALESCE($1, nombre),
         apellido = COALESCE($2, apellido),
-        dni = $3,
-        fecha_nacimiento = $4,
-        sexo = $5,
-        domicilio = $6,
-        localidad = $7,
-        cod_postal = $8,
-        provincia = $9
-       WHERE id = $10
+        email = COALESCE($3, email),
+        dni = $4,
+        fecha_nacimiento = $5,
+        sexo = $6,
+        domicilio = $7,
+        localidad = $8,
+        cod_postal = $9,
+        provincia = $10,
+        telefono = $11
+       WHERE id = $12
        RETURNING username, email, nombre, apellido, dni, fecha_nacimiento, sexo,
-                 domicilio, localidad, cod_postal, provincia, foto_perfil`,
+                 domicilio, localidad, cod_postal, provincia, telefono, foto_perfil`,
       [
         nombre,
         apellido,
+        email,
         dni,
         fecha_nacimiento || null,
         sexo,
@@ -94,11 +99,15 @@ exports.actualizarPerfil = async (req, res) => {
         localidad || null,
         cod_postal || null,
         provincia || null,
+        telefono || null,
         id,
-      ]
+      ],
     );
 
-    res.json({ mensaje: "Perfil actualizado correctamente", perfil: result.rows[0] });
+    res.json({
+      mensaje: "Perfil actualizado correctamente",
+      perfil: result.rows[0],
+    });
   } catch (error) {
     console.error("Error al actualizar perfil:", error);
     res.status(500).json({ error: "Error interno del servidor" });
@@ -123,18 +132,30 @@ exports.cambiarPassword = async (req, res) => {
       });
     }
     if (passConfig.requiereMayuscula && !/[A-Z]/.test(password_nueva)) {
-      return res.status(400).json({ error: "Debe contener al menos una mayúscula" });
+      return res
+        .status(400)
+        .json({ error: "Debe contener al menos una mayúscula" });
     }
     if (passConfig.requiereMinuscula && !/[a-z]/.test(password_nueva)) {
-      return res.status(400).json({ error: "Debe contener al menos una minúscula" });
+      return res
+        .status(400)
+        .json({ error: "Debe contener al menos una minúscula" });
     }
     if (passConfig.requiereNumero && !/[0-9]/.test(password_nueva)) {
-      return res.status(400).json({ error: "Debe contener al menos un número" });
+      return res
+        .status(400)
+        .json({ error: "Debe contener al menos un número" });
     }
 
     // Verificar contraseña actual
-    const usuario = await db.query("SELECT password_hash FROM usuarios WHERE id = $1", [id]);
-    const passwordValida = await bcrypt.compare(password_actual, usuario.rows[0].password_hash);
+    const usuario = await db.query(
+      "SELECT password_hash FROM usuarios WHERE id = $1",
+      [id],
+    );
+    const passwordValida = await bcrypt.compare(
+      password_actual,
+      usuario.rows[0].password_hash,
+    );
     if (!passwordValida) {
       return res.status(401).json({ error: "Contraseña actual incorrecta" });
     }
@@ -142,7 +163,10 @@ exports.cambiarPassword = async (req, res) => {
     // Hashear y actualizar
     const salt = await bcrypt.genSalt(10);
     const hash = await bcrypt.hash(password_nueva, salt);
-    await db.query("UPDATE usuarios SET password_hash = $1 WHERE id = $2", [hash, id]);
+    await db.query("UPDATE usuarios SET password_hash = $1 WHERE id = $2", [
+      hash,
+      id,
+    ]);
 
     res.json({ mensaje: "Contraseña actualizada correctamente" });
   } catch (error) {
@@ -154,18 +178,24 @@ exports.cambiarPassword = async (req, res) => {
 // POST /api/admin/subir-foto
 exports.subirFoto = async (req, res) => {
   try {
-    // Este endpoint requiere multer o similar. Por ahora, estructura básica.
-    // Asumimos que ya se ha configurado un middleware de subida de archivos (ej: multer)
-    if (!req.file) {
-      return res.status(400).json({ error: "No se ha subido ninguna imagen" });
+    const { foto_base64 } = req.body;
+    if (!foto_base64) {
+      return res
+        .status(400)
+        .json({ error: "No se ha recibido ninguna imagen" });
     }
 
     const { id } = req.user;
-    const fotoUrl = `/uploads/${req.file.filename}`;
 
-    await db.query("UPDATE usuarios SET foto_perfil = $1 WHERE id = $2", [fotoUrl, id]);
+    await db.query("UPDATE usuarios SET foto_perfil = $1 WHERE id = $2", [
+      foto_base64,
+      id,
+    ]);
 
-    res.json({ mensaje: "Foto actualizada correctamente", foto_url: fotoUrl });
+    res.json({
+      mensaje: "Foto actualizada correctamente",
+      foto_url: foto_base64,
+    });
   } catch (error) {
     console.error("Error al subir foto:", error);
     res.status(500).json({ error: "Error interno del servidor" });
@@ -269,7 +299,7 @@ exports.obtenerUsuario = async (req, res) => {
        LEFT JOIN planes p ON s.plan_id = p.id
        LEFT JOIN billeteras b ON u.id = b.usuario_id
        WHERE u.id = $1`,
-      [id]
+      [id],
     );
 
     if (usuario.rows.length === 0) {
@@ -279,7 +309,7 @@ exports.obtenerUsuario = async (req, res) => {
     // Obtener transacciones del usuario
     const transacciones = await db.query(
       "SELECT * FROM transacciones_token WHERE usuario_id = $1 ORDER BY created_at DESC LIMIT 50",
-      [id]
+      [id],
     );
 
     res.json({ ...usuario.rows[0], transacciones: transacciones.rows });
@@ -293,7 +323,8 @@ exports.obtenerUsuario = async (req, res) => {
 exports.actualizarUsuario = async (req, res) => {
   try {
     const { id } = req.params;
-    const { bloquear, desbloquear, cambiar_plan, regalar_tokens, tipo_cuenta } = req.body;
+    const { bloquear, desbloquear, cambiar_plan, regalar_tokens, tipo_cuenta } =
+      req.body;
 
     if (bloquear) {
       await db.query("UPDATE usuarios SET activo = FALSE WHERE id = $1", [id]);
@@ -311,22 +342,24 @@ exports.actualizarUsuario = async (req, res) => {
 
       const planId = await db.query(
         "SELECT id FROM planes WHERE LOWER(nombre) = LOWER($1)",
-        [cambiar_plan]
+        [cambiar_plan],
       );
       if (planId.rows.length === 0) {
-        return res.status(400).json({ error: "Plan no encontrado en la base de datos" });
+        return res
+          .status(400)
+          .json({ error: "Plan no encontrado en la base de datos" });
       }
 
       // Desactivar suscripción actual
       await db.query(
         "UPDATE suscripciones SET estado = 'cancelada' WHERE usuario_id = $1 AND estado = 'activa'",
-        [id]
+        [id],
       );
 
       // Crear nueva suscripción
       await db.query(
         "INSERT INTO suscripciones (usuario_id, plan_id, estado) VALUES ($1, $2, 'activa')",
-        [id, planId.rows[0].id]
+        [id, planId.rows[0].id],
       );
 
       // Agregar tokens del nuevo plan (acumulables, nunca se descuentan los existentes)
@@ -336,12 +369,12 @@ exports.actualizarUsuario = async (req, res) => {
           `INSERT INTO billeteras (usuario_id, saldo_tokens)
            VALUES ($1, $2)
            ON CONFLICT (usuario_id) DO UPDATE SET saldo_tokens = billeteras.saldo_tokens + $2`,
-          [id, tokens]
+          [id, tokens],
         );
         await db.query(
           `INSERT INTO transacciones_token (usuario_id, tipo, cantidad, descripcion, saldo_resultante, origen)
            VALUES ($1, 'carga', $2, 'Cambio de plan a ${cambiar_plan}', $2, 'cambio_plan')`,
-          [id, tokens]
+          [id, tokens],
         );
       }
     }
@@ -352,12 +385,12 @@ exports.actualizarUsuario = async (req, res) => {
         `INSERT INTO billeteras (usuario_id, saldo_tokens)
          VALUES ($1, $2)
          ON CONFLICT (usuario_id) DO UPDATE SET saldo_tokens = billeteras.saldo_tokens + $2`,
-        [id, tokens]
+        [id, tokens],
       );
       await db.query(
         `INSERT INTO transacciones_token (usuario_id, tipo, cantidad, descripcion, saldo_resultante, origen)
          VALUES ($1, 'ajuste', $2, 'Regalo de tokens por administrador', $2, 'regalo_admin')`,
-        [id, tokens]
+        [id, tokens],
       );
     }
 
@@ -366,7 +399,10 @@ exports.actualizarUsuario = async (req, res) => {
       if (!tiposValidos.includes(tipo_cuenta)) {
         return res.status(400).json({ error: "Tipo de cuenta no válido" });
       }
-      await db.query("UPDATE usuarios SET tipo_cuenta = $1 WHERE id = $2", [tipo_cuenta, id]);
+      await db.query("UPDATE usuarios SET tipo_cuenta = $1 WHERE id = $2", [
+        tipo_cuenta,
+        id,
+      ]);
     }
 
     res.json({ mensaje: "Usuario actualizado correctamente" });
@@ -409,7 +445,9 @@ exports.obtenerFinanzas = async (req, res) => {
 // GET /api/admin/promociones
 exports.listarPromociones = async (req, res) => {
   try {
-    const result = await db.query("SELECT * FROM promociones ORDER BY created_at DESC");
+    const result = await db.query(
+      "SELECT * FROM promociones ORDER BY created_at DESC",
+    );
     res.json(result.rows);
   } catch (error) {
     console.error("Error al listar promociones:", error);
@@ -420,7 +458,14 @@ exports.listarPromociones = async (req, res) => {
 // POST /api/admin/promociones
 exports.crearPromocion = async (req, res) => {
   try {
-    const { titulo, descripcion, descuento_porcentaje, planes_aplica, fecha_inicio, fecha_fin } = req.body;
+    const {
+      titulo,
+      descripcion,
+      descuento_porcentaje,
+      planes_aplica,
+      fecha_inicio,
+      fecha_fin,
+    } = req.body;
 
     if (!titulo || !descuento_porcentaje || !fecha_inicio || !fecha_fin) {
       return res.status(400).json({ error: "Campos obligatorios faltantes" });
@@ -429,10 +474,19 @@ exports.crearPromocion = async (req, res) => {
     const result = await db.query(
       `INSERT INTO promociones (titulo, descripcion, descuento_porcentaje, planes_aplica, fecha_inicio, fecha_fin)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [titulo, descripcion || "", descuento_porcentaje, planes_aplica || [], fecha_inicio, fecha_fin]
+      [
+        titulo,
+        descripcion || "",
+        descuento_porcentaje,
+        planes_aplica || [],
+        fecha_inicio,
+        fecha_fin,
+      ],
     );
 
-    res.status(201).json({ mensaje: "Promoción creada", promocion: result.rows[0] });
+    res
+      .status(201)
+      .json({ mensaje: "Promoción creada", promocion: result.rows[0] });
   } catch (error) {
     console.error("Error al crear promoción:", error);
     res.status(500).json({ error: "Error interno del servidor" });
@@ -443,7 +497,15 @@ exports.crearPromocion = async (req, res) => {
 exports.actualizarPromocion = async (req, res) => {
   try {
     const { id } = req.params;
-    const { titulo, descripcion, descuento_porcentaje, planes_aplica, fecha_inicio, fecha_fin, activa } = req.body;
+    const {
+      titulo,
+      descripcion,
+      descuento_porcentaje,
+      planes_aplica,
+      fecha_inicio,
+      fecha_fin,
+      activa,
+    } = req.body;
 
     const result = await db.query(
       `UPDATE promociones SET
@@ -455,7 +517,16 @@ exports.actualizarPromocion = async (req, res) => {
         fecha_fin = COALESCE($6, fecha_fin),
         activa = COALESCE($7, activa)
        WHERE id = $8 RETURNING *`,
-      [titulo, descripcion, descuento_porcentaje, planes_aplica, fecha_inicio, fecha_fin, activa, id]
+      [
+        titulo,
+        descripcion,
+        descuento_porcentaje,
+        planes_aplica,
+        fecha_inicio,
+        fecha_fin,
+        activa,
+        id,
+      ],
     );
 
     if (result.rows.length === 0) {

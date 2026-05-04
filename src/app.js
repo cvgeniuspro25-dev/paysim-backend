@@ -62,10 +62,13 @@ app.use(
 );
 
 // Parsear JSON entrante
-app.use(express.json({ limit: "10kb" })); // Limita tamaño para prevenir ataques de denegación de servicio
+app.use(express.json({ limit: "10mb" })); // Limita tamaño para prevenir ataques de denegación de servicio
 
 // Parsear datos de formularios URL-encoded
 app.use(express.urlencoded({ extended: true, limit: "10kb" }));
+// Servir archivos estáticos (fotos de perfil, etc.)
+const path = require("path");
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
 // ==========================================
 // RUTAS
