@@ -220,62 +220,79 @@ exports.listarUsuarios = async (req, res) => {
       limit = 20,
     } = req.query;
 
-    let query = `
-      SELECT u.id, u.username, u.nombre, u.apellido, u.dni, u.tipo_cuenta, u.email_verificado, u.activo,
+    const conditions = [];
+    const params = [];
+
+    // Búsqueda textual
+    if (busqueda) {
+      params.push(`%${busqueda}%`);
+      conditions.push(
+        `(u.apellido ILIKE $${params.length} OR u.username ILIKE $${params.length} OR u.dni ILIKE $${params.length})`,
+      );
+    }
+
+    // Estado del usuario (unificado)
+    if (estado) {
+      switch (estado) {
+        case "activado":
+          // Cuenta verificada, activa, sin deuda
+          conditions.push("u.email_verificado = TRUE");
+          conditions.push("u.activo = TRUE");
+          conditions.push(
+            "(s.estado IS NULL OR s.estado != 'impaga' OR s.fecha_fin >= NOW())",
+          );
+          break;
+        case "pendiente":
+          // Cuenta no verificada
+          conditions.push("u.email_verificado = FALSE");
+          break;
+        case "bloqueado":
+          // Cuenta desactivada manualmente
+          conditions.push("u.activo = FALSE");
+          break;
+        case "deuda":
+          // Suscripción impaga y vencida
+          conditions.push("s.estado = 'impaga'");
+          conditions.push("s.fecha_fin < NOW()");
+          break;
+      }
+    }
+
+    // Plan
+    if (plan) {
+      params.push(plan);
+      conditions.push(`LOWER(p.nombre) = LOWER($${params.length})`);
+    }
+
+    // Tipo de cuenta
+    if (tipo_cuenta) {
+      params.push(tipo_cuenta);
+      conditions.push(`u.tipo_cuenta = $${params.length}`);
+    }
+
+    // Los parámetros activo y deuda se eliminan porque el switch ya los contempla
+
+    const whereClause =
+      conditions.length > 0
+        ? `WHERE u.rol != 'admin' AND ${conditions.join(" AND ")}`
+        : `WHERE u.rol != 'admin'`;
+
+    const query = `
+      SELECT u.id, u.username, u.nombre, u.apellido, u.dni, u.tipo_cuenta, u.email_verificado, u.activo, u.created_at,
              p.nombre AS plan, b.saldo_tokens, b.deuda_tokens,
              CASE 
                WHEN s.estado = 'impaga' AND s.fecha_fin < NOW() THEN true
                ELSE false
              END AS en_deuda
       FROM usuarios u
-      LEFT JOIN suscripciones s ON u.id = s.usuario_id AND s.estado = 'activa'
+      LEFT JOIN suscripciones s ON u.id = s.usuario_id
       LEFT JOIN planes p ON s.plan_id = p.id
       LEFT JOIN billeteras b ON u.id = b.usuario_id
-      WHERE u.rol != 'admin'
+      ${whereClause}
+      ORDER BY u.created_at DESC
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
     `;
 
-    const params = [];
-    let paramIndex = 1;
-
-    if (busqueda) {
-      query += ` AND (u.apellido ILIKE $${paramIndex} OR u.username ILIKE $${paramIndex} OR u.dni ILIKE $${paramIndex})`;
-      params.push(`%${busqueda}%`);
-      paramIndex++;
-    }
-
-    if (estado) {
-      query += ` AND u.email_verificado = $${paramIndex}`;
-      params.push(estado === "activado");
-      paramIndex++;
-    }
-
-    if (plan) {
-      query += ` AND LOWER(p.nombre) = LOWER($${paramIndex})`;
-      params.push(plan);
-      paramIndex++;
-    }
-
-    if (tipo_cuenta) {
-      query += ` AND u.tipo_cuenta = $${paramIndex}`;
-      params.push(tipo_cuenta);
-      paramIndex++;
-    }
-
-    if (activo !== undefined) {
-      query += ` AND u.activo = $${paramIndex}`;
-      params.push(activo === "true");
-      paramIndex++;
-    }
-
-    if (deuda !== undefined) {
-      if (deuda === "true") {
-        query += ` AND s.estado = 'impaga' AND s.fecha_fin < NOW()`;
-      } else {
-        query += ` AND (s.estado IS NULL OR s.estado != 'impaga' OR s.fecha_fin >= NOW())`;
-      }
-    }
-
-    query += ` ORDER BY u.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     params.push(limit, offset);
 
     const result = await db.query(query, params);
@@ -335,9 +352,37 @@ exports.actualizarUsuario = async (req, res) => {
     }
 
     if (cambiar_plan) {
-      const planData = cerebro.planes[cambiar_plan.toLowerCase()];
-      if (!planData) {
+      const planKeyNuevo = Object.keys(cerebro.planes).find(
+        (k) => k.toLowerCase() === cambiar_plan.toLowerCase(),
+      );
+      if (!planKeyNuevo) {
         return res.status(400).json({ error: "Plan no válido" });
+      }
+      const planData = cerebro.planes[planKeyNuevo];
+
+      // Obtener plan actual del usuario
+      const suscripcionActual = await db.query(
+        `SELECT p.nombre FROM suscripciones s
+         JOIN planes p ON s.plan_id = p.id
+         WHERE s.usuario_id = $1 AND s.estado = 'activa'`,
+        [id],
+      );
+      if (suscripcionActual.rows.length > 0) {
+        const planActualNombre = suscripcionActual.rows[0].nombre.toLowerCase();
+        const planActualKey = Object.keys(cerebro.planes).find(
+          (k) => k.toLowerCase() === planActualNombre,
+        );
+        if (planActualKey) {
+          const tokensActuales =
+            cerebro.planes[planActualKey].tokensMensuales || 0;
+          const tokensNuevos = planData.tokensMensuales || 0;
+          if (tokensNuevos < tokensActuales) {
+            return res.status(400).json({
+              error:
+                "No está permitido cambiar a un plan inferior. El usuario debe hacerlo desde su panel.",
+            });
+          }
+        }
       }
 
       const planId = await db.query(
@@ -549,5 +594,369 @@ exports.eliminarPromocion = async (req, res) => {
   } catch (error) {
     console.error("Error al eliminar promoción:", error);
     res.status(500).json({ error: "Error interno del servidor" });
+  }
+};
+
+// GET /api/admin/usuarios/:id/detalle
+exports.obtenerDetalleUsuario = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const usuario = await db.query(
+      `SELECT u.username, u.email, u.nombre, u.apellido, u.dni, u.tipo_cuenta, u.email_verificado, u.activo, u.created_at,
+              p.nombre AS plan, b.saldo_tokens, b.deuda_tokens,
+              s.estado AS estado_suscripcion, s.fecha_inicio AS suscripcion_inicio,
+              s.metodo_pago_tokenizado,
+              (SELECT COUNT(*) FROM aplicaciones WHERE usuario_id = u.id) AS total_apps,
+              (SELECT COUNT(*) FROM tarjetas WHERE usuario_id = u.id) AS total_tarjetas
+       FROM usuarios u
+       LEFT JOIN suscripciones s ON u.id = s.usuario_id AND s.estado = 'activa'
+       LEFT JOIN planes p ON s.plan_id = p.id
+       LEFT JOIN billeteras b ON u.id = b.usuario_id
+       WHERE u.id = $1`,
+      [id],
+    );
+    if (usuario.rows.length === 0) {
+      return res.status(404).json({ error: "Usuario no encontrado" });
+    }
+
+    const transacciones = await db.query(
+      "SELECT tipo, cantidad, descripcion, saldo_resultante, created_at FROM transacciones_token WHERE usuario_id = $1 ORDER BY created_at DESC LIMIT 50",
+      [id],
+    );
+
+    const resumenes = await db.query(
+      "SELECT periodo, total_tokens_consumidos, pagado, created_at FROM resumenes_mensuales WHERE usuario_id = $1 ORDER BY periodo DESC LIMIT 12",
+      [id],
+    );
+
+    res.json({
+      ...usuario.rows[0],
+      transacciones: transacciones.rows,
+      resumenes: resumenes.rows,
+    });
+  } catch (error) {
+    console.error("Error al obtener detalle de usuario:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+};
+
+// POST /api/admin/usuarios/:id/regalar-tokens
+exports.regalarTokens = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { password_admin, cantidad } = req.body;
+
+    if (!password_admin || !cantidad) {
+      return res.status(400).json({
+        error:
+          "Contraseña de administrador y cantidad de tokens son obligatorias.",
+      });
+    }
+
+    const tokens = parseInt(cantidad, 10);
+    if (isNaN(tokens) || tokens <= 0) {
+      return res
+        .status(400)
+        .json({ error: "La cantidad debe ser un número positivo." });
+    }
+
+    // Validar contraseña del admin
+    const adminId = req.user.id;
+    const adminResult = await db.query(
+      "SELECT password_hash FROM usuarios WHERE id = $1 AND rol = 'admin'",
+      [adminId],
+    );
+    if (adminResult.rows.length === 0) {
+      return res.status(403).json({ error: "Acción no permitida." });
+    }
+
+    const passwordValida = await bcrypt.compare(
+      password_admin,
+      adminResult.rows[0].password_hash,
+    );
+    if (!passwordValida) {
+      return res
+        .status(401)
+        .json({ error: "Contraseña de administrador incorrecta." });
+    }
+
+    // Verificar que el usuario existe
+    const usuario = await db.query("SELECT id FROM usuarios WHERE id = $1", [
+      id,
+    ]);
+    if (usuario.rows.length === 0) {
+      return res.status(404).json({ error: "Usuario no encontrado." });
+    }
+
+    // Límite diario por usuario: 100 tokens
+    const hoyInicio = new Date();
+    hoyInicio.setHours(0, 0, 0, 0);
+    const hoyFin = new Date();
+    hoyFin.setHours(23, 59, 59, 999);
+
+    const regalosHoyUsuario = await db.query(
+      `SELECT COALESCE(SUM(cantidad), 0) AS total
+       FROM transacciones_token
+       WHERE usuario_id = $1 AND tipo = 'ajuste' AND origen = 'regalo_admin'
+       AND created_at BETWEEN $2 AND $3`,
+      [id, hoyInicio, hoyFin],
+    );
+    const totalHoyUsuario = parseInt(regalosHoyUsuario.rows[0].total, 10);
+    if (totalHoyUsuario + tokens > 100) {
+      return res.status(400).json({
+        error: `Límite diario excedido. Ya se regalaron ${totalHoyUsuario} tokens a este usuario hoy (máximo 100).`,
+      });
+    }
+
+    // Límite diario global: 5000 tokens
+    const regalosHoyGlobal = await db.query(
+      `SELECT COALESCE(SUM(cantidad), 0) AS total
+       FROM transacciones_token
+       WHERE tipo = 'ajuste' AND origen = 'regalo_admin'
+       AND created_at BETWEEN $1 AND $2`,
+      [hoyInicio, hoyFin],
+    );
+    const totalHoyGlobal = parseInt(regalosHoyGlobal.rows[0].total, 10);
+    if (totalHoyGlobal + tokens > 5000) {
+      return res.status(400).json({
+        error: `Límite diario global excedido. Ya se regalaron ${totalHoyGlobal} tokens hoy (máximo 5000).`,
+      });
+    }
+
+    // Acreditar tokens en billetera
+    await db.query(
+      `INSERT INTO billeteras (usuario_id, saldo_tokens)
+       VALUES ($1, $2)
+       ON CONFLICT (usuario_id) DO UPDATE SET saldo_tokens = billeteras.saldo_tokens + $2`,
+      [id, tokens],
+    );
+
+    // Registrar transacción
+    await db.query(
+      `INSERT INTO transacciones_token (usuario_id, tipo, cantidad, descripcion, saldo_resultante, origen)
+       VALUES ($1, 'ajuste', $2, 'Regalo de tokens por administrador', (SELECT saldo_tokens FROM billeteras WHERE usuario_id = $1), 'regalo_admin')`,
+      [id, tokens],
+    );
+
+    res.json({ mensaje: `${tokens} tokens regalados exitosamente.` });
+  } catch (error) {
+    console.error("Error al regalar tokens:", error);
+    res.status(500).json({ error: "Error interno del servidor." });
+  }
+};
+
+// DELETE /api/admin/usuarios/:id
+exports.eliminarUsuario = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { password_admin, username_confirmacion } = req.body;
+
+    if (!password_admin || !username_confirmacion) {
+      return res.status(400).json({
+        error:
+          "Contraseña de administrador y confirmación de usuario son obligatorias.",
+      });
+    }
+
+    const adminId = req.user.id;
+    const adminResult = await db.query(
+      "SELECT password_hash FROM usuarios WHERE id = $1 AND rol = 'admin'",
+      [adminId],
+    );
+    if (adminResult.rows.length === 0) {
+      return res.status(403).json({ error: "Acción no permitida." });
+    }
+
+    const passwordValida = await bcrypt.compare(
+      password_admin,
+      adminResult.rows[0].password_hash,
+    );
+    if (!passwordValida) {
+      return res
+        .status(401)
+        .json({ error: "Contraseña de administrador incorrecta." });
+    }
+
+    const usuarioResult = await db.query(
+      "SELECT id, username, dni, nombre, apellido FROM usuarios WHERE id = $1",
+      [id],
+    );
+    if (usuarioResult.rows.length === 0) {
+      return res.status(404).json({ error: "Usuario no encontrado." });
+    }
+
+    if (usuarioResult.rows[0].username !== username_confirmacion) {
+      return res
+        .status(400)
+        .json({ error: "El nombre de usuario de confirmación no coincide." });
+    }
+
+    const usuario = usuarioResult.rows[0];
+
+    // Transferir tokens al fondo antes de eliminar
+    const billetera = await db.query(
+      "SELECT saldo_tokens FROM billeteras WHERE usuario_id = $1",
+      [id],
+    );
+    const tokensATransferir =
+      billetera.rows.length > 0 ? billetera.rows[0].saldo_tokens : 0;
+
+    if (tokensATransferir > 0) {
+      // Acreditar al fondo
+      await db.query(
+        "UPDATE fondo SET saldo_tokens = saldo_tokens + $1, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+        [tokensATransferir],
+      );
+
+      // Registrar movimiento
+      const motivo = `Tokens transferidos desde la cuenta eliminada de ${usuario.username} (${usuario.nombre || ""} ${usuario.apellido || ""}).`;
+      await db.query(
+        `INSERT INTO fondo_movimientos (usuario_origen_id, usuario_origen_username, usuario_origen_dni, cantidad, motivo)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [usuario.id, usuario.username, usuario.dni, tokensATransferir, motivo],
+      );
+    }
+
+    // Eliminar usuario (las tablas relacionadas se eliminan por ON DELETE CASCADE)
+    await db.query("DELETE FROM usuarios WHERE id = $1", [id]);
+
+    res.json({
+      mensaje: "Usuario eliminado correctamente. Tokens transferidos al fondo.",
+      tokens_transferidos: tokensATransferir,
+    });
+  } catch (error) {
+    console.error("Error al eliminar usuario:", error);
+    res.status(500).json({ error: "Error interno del servidor." });
+  }
+};
+
+// GET /api/admin/fondo
+exports.obtenerFondo = async (req, res) => {
+  try {
+    const fondo = await db.query(
+      "SELECT saldo_tokens, invertido_tokens, gotas_acumuladas FROM fondo WHERE id = 1",
+    );
+    if (fondo.rows.length === 0) {
+      return res.status(404).json({ error: "Fondo no encontrado." });
+    }
+    const { saldo_tokens, invertido_tokens, gotas_acumuladas } = fondo.rows[0];
+
+    // Gota diaria (último registro)
+    const ultimoGoteo = await db.query(
+      "SELECT fecha, cantidad FROM fondo_goteo ORDER BY fecha DESC LIMIT 1",
+    );
+    const gota_diaria =
+      ultimoGoteo.rows.length > 0 ? ultimoGoteo.rows[0] : null;
+
+    // Movimientos recientes (últimos 50)
+    const movimientos = await db.query(
+      "SELECT fm.cantidad, fm.motivo, fm.created_at, fm.usuario_origen_username FROM fondo_movimientos fm ORDER BY fm.created_at DESC LIMIT 50",
+    );
+
+    res.json({
+      saldo_tokens,
+      invertido_tokens,
+      gotas_acumuladas,
+      gota_diaria,
+      movimientos: movimientos.rows,
+    });
+  } catch (error) {
+    console.error("Error al obtener fondo:", error);
+    res.status(500).json({ error: "Error interno del servidor." });
+  }
+};
+
+// POST /api/admin/fondo/invertir
+exports.invertirFondo = async (req, res) => {
+  try {
+    const { monto } = req.body;
+    const tokens = parseInt(monto, 10);
+
+    if (!tokens || tokens <= 0) {
+      return res
+        .status(400)
+        .json({ error: "El monto a invertir debe ser un número positivo." });
+    }
+
+    const fondo = await db.query(
+      "SELECT saldo_tokens, invertido_tokens FROM fondo WHERE id = 1 FOR UPDATE",
+    );
+    if (fondo.rows.length === 0) {
+      return res.status(404).json({ error: "Fondo no encontrado." });
+    }
+    const { saldo_tokens, invertido_tokens } = fondo.rows[0];
+
+    if (tokens > saldo_tokens) {
+      return res.status(400).json({
+        error: `No tenés suficientes tokens. Saldo disponible: ${saldo_tokens}`,
+      });
+    }
+
+    // Validar horario: entre las 15:00 y las 23:59 (hora Argentina)
+    const ahora = new Date();
+    const horaArgentina = new Date(
+      ahora.toLocaleString("en-US", {
+        timeZone: "America/Argentina/Buenos_Aires",
+      }),
+    );
+    const horas = horaArgentina.getHours();
+    const minutos = horaArgentina.getMinutes();
+
+    if (horas < 15) {
+      return res.status(400).json({
+        error: "Las inversiones están permitidas a partir de las 15:00.",
+      });
+    }
+    if (horas >= 23 && minutos > 59) {
+      return res.status(400).json({
+        error: "Las inversiones deben realizarse antes de las 23:59.",
+      });
+    }
+
+    // Actualizar saldo e inversión
+    await db.query(
+      "UPDATE fondo SET saldo_tokens = saldo_tokens - $1, invertido_tokens = invertido_tokens + $1, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+      [tokens],
+    );
+
+    // Registrar movimiento
+    const motivo = `Inversión de ${tokens} tokens (tasa 40% anual).`;
+    await db.query(
+      `INSERT INTO fondo_movimientos (usuario_origen_id, usuario_origen_username, cantidad, motivo)
+       VALUES ($1, $2, $3, $4)`,
+      [req.user.id, req.user.username, tokens, motivo],
+    );
+
+    res.json({ mensaje: `Invertidos ${tokens} tokens correctamente.` });
+  } catch (error) {
+    console.error("Error al invertir en fondo:", error);
+    res.status(500).json({ error: "Error interno del servidor." });
+  }
+};
+
+// GET /api/admin/fondo/buscar-movimiento?termino=xxx
+exports.buscarMovimientoFondo = async (req, res) => {
+  try {
+    const { termino } = req.query;
+    if (!termino) {
+      return res.status(400).json({
+        error: "Debe indicar un término de búsqueda (usuario o DNI).",
+      });
+    }
+
+    const movimientos = await db.query(
+      `SELECT fm.cantidad, fm.motivo, fm.created_at, fm.usuario_origen_username
+       FROM fondo_movimientos fm
+       WHERE fm.usuario_origen_username ILIKE $1 OR fm.usuario_origen_id::text ILIKE $1
+       ORDER BY fm.created_at DESC
+       LIMIT 50`,
+      [`%${termino}%`],
+    );
+
+    res.json({ movimientos: movimientos.rows });
+  } catch (error) {
+    console.error("Error al buscar movimientos del fondo:", error);
+    res.status(500).json({ error: "Error interno del servidor." });
   }
 };

@@ -25,5 +25,11 @@ router.get("/promociones", adminController.listarPromociones);
 router.post("/promociones", adminController.crearPromocion);
 router.put("/promociones/:id", adminController.actualizarPromocion);
 router.delete("/promociones/:id", adminController.eliminarPromocion);
+router.post("/usuarios/:id/regalar-tokens", adminController.regalarTokens);
+router.delete("/usuarios/:id", adminController.eliminarUsuario);
+router.get("/fondo", adminController.obtenerFondo);
+router.post("/fondo/invertir", adminController.invertirFondo);
+router.get("/fondo/buscar-movimiento", adminController.buscarMovimientoFondo);
+router.get("/usuarios/:id/detalle", adminController.obtenerDetalleUsuario);
 
 module.exports = router;

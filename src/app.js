@@ -18,14 +18,36 @@ const app = express();
 // 1. Helmet: Configura cabeceras HTTP seguras
 app.use(helmet());
 
-// 2. Rate Limiting: Previene ataques de fuerza bruta (100 peticiones por IP cada 15 minutos)
+// 2. Rate Limiting: Previene ataques de fuerza bruta (1000 peticiones por IP cada 15 minutos)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // límite de 100 peticiones por IP
+  max: 1000, // límite de 1000 peticiones por IP (desarrollo)
   message:
     "Demasiadas peticiones desde esta IP. Por favor, inténtelo de nuevo más tarde.",
   standardHeaders: true,
   legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    // Asegurar que se envíen cabeceras CORS incluso en respuesta de límite
+    res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.status(options.statusCode).json({ error: options.message });
+  },
+});
+
+// Manejar preflight OPTIONS para evitar que consuman el límite
+// Responder a las preflight OPTIONS sin pasar por el rate limiter
+app.use("/api", (req, res, next) => {
+  if (req.method === "OPTIONS") {
+    res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET, POST, PUT, DELETE, OPTIONS",
+    );
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    return res.sendStatus(200);
+  }
+  next();
 });
 app.use("/api/", limiter);
 

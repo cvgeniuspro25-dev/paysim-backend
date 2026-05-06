@@ -11,6 +11,9 @@ const pool = new Pool(
     ? {
         // Railway inyecta DATABASE_URL automáticamente
         connectionString: process.env.DATABASE_URL,
+        max: 5,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 2000,
       }
     : {
         // Desarrollo local
@@ -19,6 +22,9 @@ const pool = new Pool(
         user: process.env.DB_USER || "postgres",
         password: process.env.DB_PASSWORD,
         database: process.env.DB_NAME || "paysim_db",
+        max: 5,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 2000,
       },
 );
 
